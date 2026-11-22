@@ -16,8 +16,9 @@ pub fn run() -> Result<()> {
     failures += usize::from(!check("~/.rustket exists", root.is_dir()));
     failures += usize::from(!check("~/.rustket/taps exists", taps.is_dir()));
 
-    let on_path = std::env::var_os("PATH")
-        .is_some_and(|path| std::env::split_paths(&path).any(|entry| entry == bin));
+    let on_path = std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|entry| path_matches_bin(&entry, &bin))
+    });
     failures += usize::from(!check("~/.rustket/bin is on PATH", on_path));
 
     let git_installed = Proc::new("git")
@@ -39,6 +40,14 @@ pub fn run() -> Result<()> {
 fn check(label: &str, passed: bool) -> bool {
     println!("{} - {label}", if passed { "ok" } else { "FAIL" });
     passed
+}
+
+fn path_matches_bin(entry: &Path, bin: &Path) -> bool {
+    entry == bin
+        || matches!(
+            (entry.canonicalize(), bin.canonicalize()),
+            (Ok(entry), Ok(bin)) if entry == bin
+        )
 }
 
 fn has_broken_symlink(bin: &Path) -> Result<bool> {
@@ -63,4 +72,25 @@ fn has_broken_symlink(bin: &Path) -> Result<bool> {
         }
     }
     Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::path_matches_bin;
+
+    #[test]
+    fn missing_paths_do_not_match_when_canonicalization_fails() {
+        assert!(!path_matches_bin(
+            Path::new("/missing/path-entry"),
+            Path::new("/missing/rustket-bin"),
+        ));
+    }
+
+    #[test]
+    fn identical_paths_match_without_canonicalization() {
+        let path = Path::new("/missing/rustket-bin");
+        assert!(path_matches_bin(path, path));
+    }
 }
