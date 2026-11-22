@@ -30,18 +30,16 @@ Install the Rustket CLI from the official Homebrew tap:
 brew install Rustket/rustket/rustket
 ```
 
-Then add the package bits tap:
-
-```sh
-rustket tap add Rustket/rustket-bits
-```
-
 To build from source instead, install Rust and Cargo, then run:
 
 ```sh
 cargo install --git https://github.com/Rustket/rustket.git
-rustket tap add Rustket/rustket-bits
 ```
+
+Rustket automatically adds the official `Rustket/rustket-bits` tap the first
+time you list or refresh taps, or run a command that needs package definitions.
+This requires network access if the tap isn't already present; you don't need
+to run `rustket tap add` for the official tap.
 
 ## macOS verification warning
 
@@ -54,7 +52,7 @@ replace Apple's signature and notarization checks.
 
 ## Install an app
 
-The official tap is preconfigured by the installer, so you can install Rustket
+The official tap is added automatically when needed, so you can install Rustket
 itself with:
 
 ```sh

@@ -7,6 +7,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use reqwest::blocking::Client;
 
 use crate::bit;
+use crate::commands::tap;
 use crate::paths;
 
 struct TempArchive(PathBuf);
@@ -18,6 +19,7 @@ impl Drop for TempArchive {
 }
 
 pub fn run(name: &str, skip_verify: bool) -> Result<()> {
+    tap::ensure_default()?;
     let b = bit::load(name)?;
     let platform = paths::current_platform();
     let artifact = b
