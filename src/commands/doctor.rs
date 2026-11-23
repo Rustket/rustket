@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::Path;
 use std::process::Command as Proc;
 
@@ -51,24 +50,10 @@ fn path_matches_bin(entry: &Path, bin: &Path) -> bool {
 }
 
 fn has_broken_symlink(bin: &Path) -> Result<bool> {
-    let entries = match fs::read_dir(bin) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error.into()),
-    };
-    for entry in entries {
-        let entry = entry?;
+    for entry in paths::read_dir(bin)? {
         let link = entry.path();
-        if fs::symlink_metadata(&link)?.file_type().is_symlink() {
-            let target = fs::read_link(&link)?;
-            let target = if target.is_absolute() {
-                target
-            } else {
-                link.parent().unwrap_or(bin).join(target)
-            };
-            if !target.exists() {
-                return Ok(true);
-            }
+        if entry.file_type()?.is_symlink() && !link.exists() {
+            return Ok(true);
         }
     }
     Ok(false)

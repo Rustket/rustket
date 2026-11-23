@@ -1,7 +1,4 @@
-use std::fs;
-use std::io::ErrorKind;
-
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use crate::paths;
 
@@ -13,21 +10,10 @@ pub fn run() -> Result<()> {
 }
 
 pub fn installed_names() -> Result<Vec<String>> {
-    let bin_dir = paths::root().join("bin");
-    let entries = match fs::read_dir(&bin_dir) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => {
-            return Err(error).with_context(|| format!("failed to read {}", bin_dir.display()));
-        }
-    };
-    let mut names = entries
-        .map(|entry| {
-            entry
-                .map(|entry| entry.file_name().to_string_lossy().into_owned())
-                .with_context(|| format!("failed to read entry in {}", bin_dir.display()))
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let mut names = paths::read_dir(&paths::root().join("bin"))?
+        .into_iter()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
     names.sort();
     Ok(names)
 }
