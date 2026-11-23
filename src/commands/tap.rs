@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command as Proc;
+use std::process::{Command as Proc, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -27,13 +27,24 @@ pub fn ensure_default() -> Result<()> {
 
 pub fn update_all() -> Result<()> {
     ensure_default()?;
-    let taps = tap_paths()?;
-    for (name, path) in taps {
-        let output = Proc::new("git")
-            .arg("-C")
-            .arg(&path)
-            .args(["pull", "--ff-only"])
-            .output()
+    // Pull every tap concurrently; report in sorted order.
+    let pulls = tap_paths()?
+        .into_iter()
+        .map(|(name, path)| {
+            let child = Proc::new("git")
+                .arg("-C")
+                .arg(&path)
+                .args(["pull", "--ff-only"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .with_context(|| format!("failed to update tap {name}"));
+            (name, child)
+        })
+        .collect::<Vec<_>>();
+    for (name, child) in pulls {
+        let output = child?
+            .wait_with_output()
             .with_context(|| format!("failed to update tap {name}"))?;
         if !output.status.success() {
             bail!(
@@ -109,48 +120,7 @@ fn remove(repository: &str) -> Result<()> {
 }
 
 fn tap_paths() -> Result<Vec<(String, PathBuf)>> {
-    tap_paths_at(&paths::taps())
-}
-
-fn tap_paths_at(tap_root: &Path) -> Result<Vec<(String, PathBuf)>> {
-    let owners = match fs::read_dir(tap_root) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => {
-            return Err(error).with_context(|| format!("failed to read {}", tap_root.display()));
-        }
-    };
-
-    let mut taps = Vec::new();
-    for owner in owners {
-        let owner = owner.with_context(|| format!("failed to read {}", tap_root.display()))?;
-        if !owner
-            .file_type()
-            .with_context(|| format!("failed to inspect {}", owner.path().display()))?
-            .is_dir()
-        {
-            continue;
-        }
-        let owner_name = owner.file_name().to_string_lossy().into_owned();
-        let owner_path = owner.path();
-        for repository in fs::read_dir(&owner_path)
-            .with_context(|| format!("failed to read {}", owner_path.display()))?
-        {
-            let repository =
-                repository.with_context(|| format!("failed to read {}", owner_path.display()))?;
-            if !repository
-                .file_type()
-                .with_context(|| format!("failed to inspect {}", repository.path().display()))?
-                .is_dir()
-            {
-                continue;
-            }
-            let repo_name = repository.file_name().to_string_lossy().into_owned();
-            taps.push((format!("{owner_name}/{repo_name}"), repository.path()));
-        }
-    }
-    taps.sort_by(|left, right| left.0.cmp(&right.0));
-    Ok(taps)
+    paths::tap_dirs(&paths::taps())
 }
 
 fn ensure_default_at(tap_root: &Path, add_default: impl FnOnce() -> Result<()>) -> Result<()> {
@@ -164,7 +134,7 @@ fn ensure_default_at(tap_root: &Path, add_default: impl FnOnce() -> Result<()>) 
             path.display()
         ),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            if tap_paths_at(tap_root)?
+            if paths::tap_dirs(tap_root)?
                 .iter()
                 .any(|(name, _)| name.eq_ignore_ascii_case(DEFAULT_TAP))
             {

@@ -1,10 +1,11 @@
 use std::fs;
-use std::io::Write;
-use std::path::PathBuf;
+use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
 use std::process::Command as Proc;
 
 use anyhow::{Context, Result, anyhow, bail};
 use reqwest::blocking::Client;
+use sha2::{Digest, Sha256};
 
 use crate::bit;
 use crate::commands::tap;
@@ -27,22 +28,11 @@ pub fn run(name: &str, skip_verify: bool) -> Result<()> {
         .get(&platform)
         .ok_or_else(|| anyhow!("{} has no build for {}", b.name, platform))?;
 
-    let response = Client::new()
-        .get(&artifact.url)
-        .send()
-        .with_context(|| format!("failed to download {}", artifact.url))?
-        .error_for_status()
-        .with_context(|| format!("download failed for {}", artifact.url))?;
     let archive_path = std::env::temp_dir().join(format!("rustket-{}.tar.gz", std::process::id()));
     let _archive = TempArchive(archive_path.clone());
-    let mut archive = fs::File::create(&archive_path)
-        .with_context(|| format!("failed to create {}", archive_path.display()))?;
-    archive
-        .write_all(&response.bytes()?)
-        .with_context(|| format!("failed to write {}", archive_path.display()))?;
-
-    if !skip_verify {
-        verify_sha256(&archive_path, &artifact.sha256)?;
+    let digest = download(&artifact.url, &archive_path)?;
+    if !skip_verify && !digest.eq_ignore_ascii_case(&artifact.sha256) {
+        bail!("sha256 mismatch: expected {}, got {digest}", artifact.sha256);
     }
 
     let cellar = paths::root().join("cellar").join(&b.name).join(&b.version);
@@ -80,37 +70,42 @@ pub fn run(name: &str, skip_verify: bool) -> Result<()> {
     Ok(())
 }
 
-fn verify_sha256(path: &std::path::Path, expected: &str) -> Result<()> {
-    let output = match Proc::new("shasum").args(["-a", "256"]).arg(path).output() {
-        Ok(output) if output.status.success() => output,
-        _ => Proc::new("sha256sum")
-            .arg(path)
-            .output()
-            .context("failed to run shasum or sha256sum")?,
-    };
-    if !output.status.success() {
-        bail!(
-            "sha256 verification failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
+/// Stream `url` to `path`, hashing on the fly; returns the hex SHA-256.
+fn download(url: &str, path: &Path) -> Result<String> {
+    let mut response = Client::new()
+        .get(url)
+        .send()
+        .and_then(|r| r.error_for_status())
+        .with_context(|| format!("failed to download {url}"))?;
+    let file = fs::File::create(path)
+        .with_context(|| format!("failed to create {}", path.display()))?;
+    let mut sink = HashWriter(BufWriter::new(file), Sha256::new());
+    response
+        .copy_to(&mut sink)
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    sink.0.flush()?;
+    Ok(format!("{:x}", sink.1.finalize()))
+}
+
+struct HashWriter<W>(W, Sha256);
+
+impl<W: Write> Write for HashWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let n = self.0.write(buf)?;
+        self.1.update(&buf[..n]);
+        Ok(n)
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let actual = stdout
-        .split_whitespace()
-        .next()
-        .ok_or_else(|| anyhow!("sha256 tool returned no digest"))?;
-    if !actual.eq_ignore_ascii_case(expected) {
-        bail!("sha256 mismatch: expected {expected}, got {actual}");
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
     }
-    Ok(())
 }
 
 #[cfg(unix)]
-fn create_symlink(target: &std::path::Path, link: &std::path::Path) -> std::io::Result<()> {
+fn create_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
     std::os::unix::fs::symlink(target, link)
 }
 
 #[cfg(windows)]
-fn create_symlink(target: &std::path::Path, link: &std::path::Path) -> std::io::Result<()> {
+fn create_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
     std::os::windows::fs::symlink_file(target, link)
 }
