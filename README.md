@@ -1,3 +1,4 @@
+<img alt="gitleaks badge" src="https://img.shields.io/badge/protected%20by-gitleaks-blue">
 # Rustket
 
 Rustket is a small Rust command-line package manager for macOS and Linux. It
@@ -163,3 +164,4 @@ cargo clippy
 
 The release workflow builds macOS and Linux archives for ARM64 and x86_64 and
 generates their checksums and a Rustket bit manifest.
+
