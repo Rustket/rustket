@@ -58,8 +58,9 @@ jobs:
     name: Cargo audit
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      checks: write
+      contents: read # checkout
+      checks: write # publish audit check on PRs and pushes
+      issues: write # scheduled runs open an issue per new advisory
     steps:
       - uses: actions/checkout@v4
       - uses: rustsec/audit-check@v2
